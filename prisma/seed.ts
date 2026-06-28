@@ -111,11 +111,11 @@ async function main() {
   });
 
   await prisma.sourceConfig.createMany({
-    data: ["Reddit", "YouTube", "X", "Meta", "LinkedIn"].map((platform) => ({
+    data: ["Reddit", "YouTube", "X", "Meta", "Public Web", "LinkedIn"].map((platform) => ({
       platform,
-      enabled: platform !== "LinkedIn",
+      enabled: !["LinkedIn", "Public Web"].includes(platform),
       status: platform === "LinkedIn" ? "manual_import" : "not_configured",
-      config: {},
+      config: platform === "Public Web" ? { urls: [] } : {},
     })),
   });
 

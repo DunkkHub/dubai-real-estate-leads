@@ -15,6 +15,7 @@ import { fetchRedditOpportunities } from "@/lib/sources/reddit";
 import { fetchYouTubeOpportunities } from "@/lib/sources/youtube";
 import { fetchXOpportunities } from "@/lib/sources/x";
 import { metaStatus } from "@/lib/sources/meta";
+import { fetchWebOpportunities } from "@/lib/sources/web";
 import type { SourceFetchResult } from "@/lib/sources/types";
 
 function formString(formData: FormData, key: string) {
@@ -277,6 +278,67 @@ export async function updateSourceEnabledAction(formData: FormData) {
   revalidatePath("/sources");
 }
 
+export async function addScraperUrlAction(formData: FormData) {
+  const user = await requireUser();
+  const rawUrl = formString(formData, "url");
+  let url: string;
+
+  try {
+    const parsed = new URL(rawUrl);
+    if (!["http:", "https:"].includes(parsed.protocol)) return;
+    parsed.hash = "";
+    url = parsed.toString();
+  } catch {
+    return;
+  }
+
+  const existing = await prisma.sourceConfig.findUnique({ where: { platform: "Public Web" } });
+  const urls = sourceConfigUrls(existing?.config);
+  const nextUrls = Array.from(new Set([...urls, url]));
+
+  await prisma.sourceConfig.upsert({
+    where: { platform: "Public Web" },
+    update: {
+      enabled: true,
+      status: "configured",
+      config: { urls: nextUrls },
+    },
+    create: {
+      platform: "Public Web",
+      enabled: true,
+      status: "configured",
+      config: { urls: nextUrls },
+    },
+  });
+
+  await auditLog({ actorId: user.id, action: "scraper.url_added", entityType: "SourceConfig", metadata: { url } });
+  revalidatePath("/sources");
+}
+
+export async function deleteScraperUrlAction(formData: FormData) {
+  const user = await requireUser();
+  const rawUrl = formString(formData, "url");
+  const existing = await prisma.sourceConfig.findUnique({ where: { platform: "Public Web" } });
+  const nextUrls = sourceConfigUrls(existing?.config).filter((url) => url !== rawUrl);
+
+  await prisma.sourceConfig.upsert({
+    where: { platform: "Public Web" },
+    update: {
+      status: nextUrls.length ? "configured" : "not_configured",
+      config: { urls: nextUrls },
+    },
+    create: {
+      platform: "Public Web",
+      enabled: false,
+      status: "not_configured",
+      config: { urls: nextUrls },
+    },
+  });
+
+  await auditLog({ actorId: user.id, action: "scraper.url_deleted", entityType: "SourceConfig", metadata: { url: rawUrl } });
+  revalidatePath("/sources");
+}
+
 export async function syncSourceAction(formData: FormData) {
   const user = await requireUser();
   const platform = formString(formData, "platform");
@@ -286,7 +348,7 @@ export async function syncSourceAction(formData: FormData) {
     orderBy: { value: "asc" },
   });
   const keywordValues = keywords.length ? keywords.map((keyword) => keyword.value) : TARGET_KEYWORDS;
-  const platforms = platform === "All" ? ["Reddit", "YouTube", "X", "Meta"] : [platform];
+  const platforms = platform === "All" ? ["Reddit", "YouTube", "X", "Meta", "Public Web"] : [platform];
   const results: Array<{ platform: string; result: SourceFetchResult; saved: number }> = [];
 
   for (const current of platforms) {
@@ -374,6 +436,10 @@ async function fetchSource(platform: string, keywords: string[], dryRun: boolean
       return fetchXOpportunities({ keywords, dryRun, limit: 25 });
     case "Meta":
       return metaStatus();
+    case "Public Web": {
+      const config = await prisma.sourceConfig.findUnique({ where: { platform: "Public Web" } });
+      return fetchWebOpportunities({ keywords, dryRun, limit: 20, urls: sourceConfigUrls(config?.config) });
+    }
     default:
       return {
         configured: false,
@@ -382,4 +448,11 @@ async function fetchSource(platform: string, keywords: string[], dryRun: boolean
         opportunities: [],
       };
   }
+}
+
+function sourceConfigUrls(config: unknown) {
+  if (!config || typeof config !== "object" || !("urls" in config)) return [];
+  const urls = (config as { urls?: unknown }).urls;
+  if (!Array.isArray(urls)) return [];
+  return urls.filter((url): url is string => typeof url === "string");
 }

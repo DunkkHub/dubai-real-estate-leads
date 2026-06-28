@@ -8,7 +8,7 @@ Consent-first Dubai real estate opportunity discovery and CRM platform.
 - Creates CRM `Lead` records only after explicit consent through the landing page, ROI calculator, manual proof, CSV proof, or Meta Lead Ads metadata.
 - Stores consent proof: exact text, timestamp, source, channel, IP, user agent, and allowed contact channels.
 - Provides dashboard KPIs, source/lead-stage charts, outreach queue, CRM pipeline, notes, follow-ups, import/export, deletion, withdrawal, and compliance settings.
-- Includes official-API connector modules for Reddit, YouTube, X, Meta webhooks, and CSV import.
+- Includes official-API connector modules for Reddit, YouTube, X, Meta webhooks, CSV import, and a robots-aware Public Web scraper.
 - Does not include automatic DMs, automatic comments, profile contact scraping, or spam sending.
 
 ## Tech Stack
@@ -56,6 +56,26 @@ Optional:
 - `META_WEBHOOK_VERIFY_TOKEN`
 
 Missing source credentials are shown as `not_configured` and do not crash pages.
+
+## Public Web Scraper
+
+The `/sources` page includes `Public Web`, a scraper for operator-approved seed URLs.
+
+It:
+
+- fetches public HTTP/HTTPS pages only
+- checks `robots.txt` before fetching each page
+- uses a clear `DubaiLeadCRM-WebScraper` user agent
+- scans public page text for configured Dubai real estate intent keywords
+- saves matching snippets as `Opportunity` records
+- never stores scraped emails, phones, WhatsApp numbers, or private profile contact data
+
+It does not:
+
+- log into websites
+- bypass paywalls, CAPTCHAs, robots.txt, or rate limits
+- scrape private contact details
+- create CRM leads without consent
 
 ## CSV Imports
 

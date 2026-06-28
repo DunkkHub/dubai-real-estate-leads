@@ -6,7 +6,7 @@ import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { addKeywordAction, deleteKeywordAction, syncSourceAction, updateSourceEnabledAction } from "@/app/actions/crm";
+import { addKeywordAction, addScraperUrlAction, deleteKeywordAction, deleteScraperUrlAction, syncSourceAction, updateSourceEnabledAction } from "@/app/actions/crm";
 import { requireUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { formatDate } from "@/lib/utils";
@@ -18,6 +18,7 @@ const sourceDefinitions = [
   { platform: "YouTube", env: ["YOUTUBE_API_KEY"] },
   { platform: "X", env: ["X_BEARER_TOKEN"] },
   { platform: "Meta", env: ["META_APP_ID", "META_APP_SECRET", "META_WEBHOOK_VERIFY_TOKEN"] },
+  { platform: "Public Web", env: ["Robots-aware public URL scraper"] },
   { platform: "LinkedIn", env: ["Manual CSV import only"] },
 ];
 
@@ -77,6 +78,7 @@ export default async function SourcesPage({ searchParams }: PageProps) {
             const missing = source.env.filter((key) => key.includes("_") && !process.env[key]);
             const configured = missing.length === 0 && !source.env[0].startsWith("Manual");
             const status = config?.status || (source.env[0].startsWith("Manual") ? "manual_import" : configured ? "configured" : "not_configured");
+            const scraperUrls = sourceConfigUrls(config?.config);
             return (
               <Card key={source.platform}>
                 <CardHeader>
@@ -112,6 +114,35 @@ export default async function SourcesPage({ searchParams }: PageProps) {
                       <SubmitButton variant="secondary" size="sm" pendingText="Checking...">Dry run</SubmitButton>
                     </form>
                   </div>
+                  {source.platform === "Public Web" ? (
+                    <div className="space-y-3 rounded-md border border-stone-200 bg-stone-50 p-3">
+                      <form action={addScraperUrlAction} className="grid gap-2 sm:grid-cols-[1fr_auto]">
+                        <Field label="Seed URL">
+                          <Input name="url" type="url" placeholder="https://example.com/dubai-property-discussion" required />
+                        </Field>
+                        <div className="flex items-end">
+                          <SubmitButton size="sm">
+                            <Plus className="h-4 w-4" aria-hidden="true" />
+                            Add URL
+                          </SubmitButton>
+                        </div>
+                      </form>
+                      <div className="space-y-2">
+                        {scraperUrls.map((url) => (
+                          <div key={url} className="flex items-center justify-between gap-2 rounded-md bg-white px-3 py-2 text-sm">
+                            <span className="min-w-0 truncate text-stone-700">{url}</span>
+                            <form action={deleteScraperUrlAction}>
+                              <input type="hidden" name="url" value={url} />
+                              <SubmitButton variant="ghost" size="icon" aria-label={`Delete ${url}`}>
+                                <Trash2 className="h-4 w-4" aria-hidden="true" />
+                              </SubmitButton>
+                            </form>
+                          </div>
+                        ))}
+                        {scraperUrls.length === 0 ? <p className="text-sm text-stone-500">Add public pages to scrape. The scraper respects robots.txt and stores only text snippets as opportunities.</p> : null}
+                      </div>
+                    </div>
+                  ) : null}
                 </CardContent>
               </Card>
             );
@@ -165,4 +196,11 @@ export default async function SourcesPage({ searchParams }: PageProps) {
       </div>
     </AppShell>
   );
+}
+
+function sourceConfigUrls(config: unknown) {
+  if (!config || typeof config !== "object" || !("urls" in config)) return [];
+  const urls = (config as { urls?: unknown }).urls;
+  if (!Array.isArray(urls)) return [];
+  return urls.filter((url): url is string => typeof url === "string");
 }
