@@ -1,4 +1,5 @@
 import { scoreOpportunity, suggestedPublicReply } from "@/lib/scoring";
+import { opportunityDedupeHash } from "@/lib/scraper/dedupe";
 import { safeText } from "@/lib/utils";
 import type { NormalizedOpportunity, SourceFetchResult } from "@/lib/sources/types";
 
@@ -35,24 +36,58 @@ export function dryRun(platform: string, opportunities: NormalizedOpportunity[])
 export function normalizePublicTextOpportunity(input: {
   platform: string;
   sourceUrl: string;
+  title?: string | null;
+  externalId?: string | null;
+  postId?: string | null;
+  commentId?: string | null;
   authorHandle?: string | null;
   text: string;
+  scrapedAt?: Date | string | null;
   language?: string;
+  rawJson?: Record<string, unknown>;
 }): NormalizedOpportunity {
-  const publicTextSnippet = safeText(input.text, 500);
+  const publicTextSnippet = safeText(redactContactData(input.text), 700);
   const scoring = scoreOpportunity({ text: publicTextSnippet, platform: input.platform });
+  const title = input.title ? safeText(redactContactData(input.title), 180) : null;
+  const dedupeHash = opportunityDedupeHash({
+    platform: input.platform,
+    externalId: input.externalId,
+    postId: input.postId,
+    commentId: input.commentId,
+    sourceUrl: input.sourceUrl,
+    text: publicTextSnippet,
+  });
   return {
     platform: input.platform,
     sourceUrl: input.sourceUrl,
+    title,
+    externalId: input.externalId ?? null,
+    postId: input.postId ?? null,
+    commentId: input.commentId ?? null,
     authorHandle: safeText(input.authorHandle, 80) || null,
     publicTextSnippet,
     detectedKeywords: scoring.detectedKeywords,
     detectedArea: scoring.detectedArea,
+    detectedBudget: scoring.detectedBudget,
+    detectedTimeline: scoring.detectedTimeline,
+    detectedPropertyType: scoring.detectedPropertyType,
     intentCategory: scoring.intentCategory,
     intentScore: scoring.intentScore,
     sentiment: scoring.sentiment,
     language: input.language ?? "en",
     suggestedAction: suggestedPublicReply(publicTextSnippet),
     summary: `${scoring.intentCategory} opportunity from ${input.platform}`,
+    scrapedAt: input.scrapedAt ?? new Date(),
+    dedupeHash,
+    rawJson: input.rawJson ?? {},
   };
+}
+
+export function redactContactData(text: string) {
+  return text
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "[redacted email]")
+    .replace(/(?:\+?\d[\d\s().-]{7,}\d)/g, "[redacted phone]")
+    .replace(/\b(?:whatsapp|wa)\s*[:\-]?\s*[+\d][\d\s().-]{7,}\b/gi, "[redacted WhatsApp]")
+    .replace(/\s+/g, " ")
+    .trim();
 }

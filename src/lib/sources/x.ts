@@ -6,6 +6,7 @@ type XTweets = {
     id: string;
     text: string;
     author_id?: string;
+    created_at?: string;
   }>;
 };
 
@@ -16,8 +17,10 @@ export async function fetchXOpportunities(options: SourceFetchOptions): Promise<
     normalizePublicTextOpportunity({
       platform: "X",
       sourceUrl: `https://x.com/search?q=${encodeURIComponent(keyword)}&sample=${index}`,
+      title: `X public post: ${keyword}`,
+      externalId: `dry-x-${index}`,
       authorHandle: "public_x_user",
-      text: `Can anyone recommend where to ${keyword}? Comparing JVC and Dubai Marina.`,
+      text: `Looking to buy property in Dubai, budget 900k AED this year. Can anyone recommend where to ${keyword}? Comparing JVC and Dubai Marina.`,
     }),
   );
   if (options.dryRun) return dryRun("X", sample);
@@ -45,8 +48,13 @@ export async function fetchXOpportunities(options: SourceFetchOptions): Promise<
       normalizePublicTextOpportunity({
         platform: "X",
         sourceUrl: `https://x.com/i/web/status/${tweet.id}`,
+        title: "X public post",
+        externalId: tweet.id,
+        postId: tweet.id,
         authorHandle: tweet.author_id ? `author:${tweet.author_id}` : null,
         text: tweet.text,
+        scrapedAt: new Date(),
+        rawJson: tweet as unknown as Record<string, unknown>,
       }),
     );
 

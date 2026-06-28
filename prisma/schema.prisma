@@ -70,6 +70,13 @@ enum KeywordType {
   AREA
 }
 
+enum ScrapeJobStatus {
+  PENDING
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
 model User {
   id           String         @id @default(cuid())
   name         String
@@ -89,11 +96,18 @@ model User {
 model Opportunity {
   id               String            @id @default(cuid())
   platform         String
-  sourceUrl        String            @unique
+  sourceUrl        String
+  title            String?
+  externalId       String?
+  postId           String?
+  commentId        String?
   authorHandle     String?
   publicTextSnippet String
   detectedKeywords String[]
   detectedArea     String?
+  detectedBudget   String?
+  detectedTimeline String?
+  detectedPropertyType String?
   intentCategory   String
   intentScore      Int
   sentiment        String
@@ -101,15 +115,37 @@ model Opportunity {
   summary          String?
   suggestedAction  String
   status           OpportunityStatus @default(NEW)
+  scrapedAt        DateTime?
+  dedupeHash       String?           @unique
+  rawJson          Json              @default("{}")
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
 
   outreachTasks OutreachTask[]
   leads         Lead[]
 
+  @@unique([platform, sourceUrl])
   @@index([platform])
   @@index([status])
   @@index([intentScore])
+  @@index([scrapedAt])
+  @@index([createdAt])
+}
+
+model ScrapeJob {
+  id           String          @id @default(cuid())
+  source       String
+  query        String
+  status       ScrapeJobStatus @default(PENDING)
+  resultsCount Int             @default(0)
+  savedCount   Int             @default(0)
+  error        String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime        @default(now())
+
+  @@index([source])
+  @@index([status])
   @@index([createdAt])
 }
 

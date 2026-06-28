@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth/options";
 import { auditLog } from "@/lib/audit";
 import { createConsentedLead } from "@/lib/leads";
 import { prisma } from "@/lib/prisma";
+import { saveOpportunities } from "@/lib/scraper/save";
 import { parseLeadCsv, parseOpportunityCsv } from "@/lib/sources/csv";
 
 export async function POST(request: NextRequest) {
@@ -60,26 +61,7 @@ export async function POST(request: NextRequest) {
   }
 
   const parsed = parseOpportunityCsv(text);
-  let imported = 0;
-  for (const row of parsed.rows) {
-    await prisma.opportunity.upsert({
-      where: { sourceUrl: row.sourceUrl },
-      update: {
-        platform: row.platform,
-        publicTextSnippet: row.publicTextSnippet,
-        detectedKeywords: row.detectedKeywords,
-        detectedArea: row.detectedArea,
-        intentCategory: row.intentCategory,
-        intentScore: row.intentScore,
-        sentiment: row.sentiment,
-        language: row.language,
-        suggestedAction: row.suggestedAction,
-        summary: row.summary,
-      },
-      create: row,
-    });
-    imported += 1;
-  }
+  const imported = await saveOpportunities(parsed.rows);
 
   await prisma.importJob.update({
     where: { id: job.id },

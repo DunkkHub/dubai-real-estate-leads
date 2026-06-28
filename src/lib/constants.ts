@@ -32,6 +32,7 @@ export const DUBAI_AREAS = [
   "Palm Jumeirah",
   "Dubai Hills",
   "JLT",
+  "Arjan",
   "DIFC",
   "Arabian Ranches",
   "Dubai Creek Harbour",

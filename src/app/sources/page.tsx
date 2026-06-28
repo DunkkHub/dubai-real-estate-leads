@@ -6,7 +6,15 @@ import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { addKeywordAction, addScraperUrlAction, deleteKeywordAction, deleteScraperUrlAction, syncSourceAction, updateSourceEnabledAction } from "@/app/actions/crm";
+import {
+  addKeywordAction,
+  addScraperUrlAction,
+  deleteKeywordAction,
+  deleteScraperUrlAction,
+  syncSourceAction,
+  updateScraperSettingsAction,
+  updateSourceEnabledAction,
+} from "@/app/actions/crm";
 import { requireUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
 import { formatDate } from "@/lib/utils";
@@ -78,7 +86,8 @@ export default async function SourcesPage({ searchParams }: PageProps) {
             const missing = source.env.filter((key) => key.includes("_") && !process.env[key]);
             const configured = missing.length === 0 && !source.env[0].startsWith("Manual");
             const status = config?.status || (source.env[0].startsWith("Manual") ? "manual_import" : configured ? "configured" : "not_configured");
-            const scraperUrls = sourceConfigUrls(config?.config);
+            const scraperConfig = sourceConfigObject(config?.config);
+            const scraperUrls = sourceConfigUrls(scraperConfig);
             return (
               <Card key={source.platform}>
                 <CardHeader>
@@ -116,6 +125,26 @@ export default async function SourcesPage({ searchParams }: PageProps) {
                   </div>
                   {source.platform === "Public Web" ? (
                     <div className="space-y-3 rounded-md border border-stone-200 bg-stone-50 p-3">
+                      <form action={updateScraperSettingsAction} className="grid gap-3 lg:grid-cols-2">
+                        <Field label="CSS selector mode">
+                          <Input name="selector" placeholder=".comment, article, .post" defaultValue={stringConfig(scraperConfig.selector)} />
+                        </Field>
+                        <Field label="Pagination template">
+                          <Input name="paginationTemplate" placeholder="https://example.com/page/{page}" defaultValue={stringConfig(scraperConfig.paginationTemplate)} />
+                        </Field>
+                        <Field label="Max pages">
+                          <Input name="maxPages" type="number" min="1" max="20" defaultValue={numberConfig(scraperConfig.maxPages, 1)} />
+                        </Field>
+                        <Field label="Delay ms">
+                          <Input name="delayMs" type="number" min="0" defaultValue={numberConfig(scraperConfig.delayMs, 1200)} />
+                        </Field>
+                        <Field label="Timeout ms">
+                          <Input name="timeoutMs" type="number" min="3000" max="30000" defaultValue={numberConfig(scraperConfig.timeoutMs, 12000)} />
+                        </Field>
+                        <div className="flex items-end">
+                          <SubmitButton variant="secondary" size="sm">Save scraper settings</SubmitButton>
+                        </div>
+                      </form>
                       <form action={addScraperUrlAction} className="grid gap-2 sm:grid-cols-[1fr_auto]">
                         <Field label="Seed URL">
                           <Input name="url" type="url" placeholder="https://example.com/dubai-property-discussion" required />
@@ -199,8 +228,21 @@ export default async function SourcesPage({ searchParams }: PageProps) {
 }
 
 function sourceConfigUrls(config: unknown) {
-  if (!config || typeof config !== "object" || !("urls" in config)) return [];
-  const urls = (config as { urls?: unknown }).urls;
+  const object = sourceConfigObject(config);
+  const urls = object.urls;
   if (!Array.isArray(urls)) return [];
   return urls.filter((url): url is string => typeof url === "string");
+}
+
+function sourceConfigObject(config: unknown): Record<string, unknown> {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return {};
+  return config as Record<string, unknown>;
+}
+
+function stringConfig(value: unknown) {
+  return typeof value === "string" ? value : "";
+}
+
+function numberConfig(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }

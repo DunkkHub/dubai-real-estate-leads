@@ -8,12 +8,14 @@ import {
   KeyRound,
   Megaphone,
   ShieldCheck,
+  Search,
   Users,
 } from "lucide-react";
 import { SignOutButton } from "@/components/sign-out-button";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
+  { href: "/scraper", label: "Scraper", icon: Search },
   { href: "/opportunities", label: "Opportunities", icon: ClipboardList },
   { href: "/outreach", label: "Outreach", icon: Megaphone },
   { href: "/leads", label: "Leads", icon: Users },

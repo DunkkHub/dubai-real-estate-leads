@@ -10,6 +10,7 @@ import { createConsentedLead, deleteLeadWithAudit, withdrawLeadConsent } from "@
 import { analyzeOpportunityWithAi } from "@/lib/ai";
 import { TARGET_KEYWORDS } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
+import { saveOpportunities } from "@/lib/scraper/save";
 import { suggestedPublicReply } from "@/lib/scoring";
 import { fetchRedditOpportunities } from "@/lib/sources/reddit";
 import { fetchYouTubeOpportunities } from "@/lib/sources/youtube";
@@ -339,6 +340,38 @@ export async function deleteScraperUrlAction(formData: FormData) {
   revalidatePath("/sources");
 }
 
+export async function updateScraperSettingsAction(formData: FormData) {
+  const user = await requireUser();
+  const existing = await prisma.sourceConfig.findUnique({ where: { platform: "Public Web" } });
+  const config = sourceConfigObject(existing?.config);
+  const nextConfig = {
+    ...config,
+    selector: formString(formData, "selector").trim() || null,
+    paginationTemplate: formString(formData, "paginationTemplate").trim() || null,
+    maxPages: Math.max(1, Math.min(Number(formString(formData, "maxPages")) || 1, 20)),
+    delayMs: Math.max(0, Number(formString(formData, "delayMs")) || 1200),
+    timeoutMs: Math.max(3000, Math.min(Number(formString(formData, "timeoutMs")) || 12000, 30000)),
+  };
+
+  await prisma.sourceConfig.upsert({
+    where: { platform: "Public Web" },
+    update: {
+      enabled: true,
+      status: sourceConfigUrls(nextConfig).length ? "configured" : "not_configured",
+      config: nextConfig,
+    },
+    create: {
+      platform: "Public Web",
+      enabled: true,
+      status: sourceConfigUrls(nextConfig).length ? "configured" : "not_configured",
+      config: nextConfig,
+    },
+  });
+
+  await auditLog({ actorId: user.id, action: "scraper.settings_updated", entityType: "SourceConfig", metadata: nextConfig });
+  revalidatePath("/sources");
+}
+
 export async function syncSourceAction(formData: FormData) {
   const user = await requireUser();
   const platform = formString(formData, "platform");
@@ -356,26 +389,7 @@ export async function syncSourceAction(formData: FormData) {
     let saved = 0;
 
     if (!dryRun && result.opportunities.length > 0) {
-      for (const opportunity of result.opportunities) {
-        await prisma.opportunity.upsert({
-          where: { sourceUrl: opportunity.sourceUrl },
-          update: {
-            platform: opportunity.platform,
-            authorHandle: opportunity.authorHandle,
-            publicTextSnippet: opportunity.publicTextSnippet,
-            detectedKeywords: opportunity.detectedKeywords,
-            detectedArea: opportunity.detectedArea,
-            intentCategory: opportunity.intentCategory,
-            intentScore: opportunity.intentScore,
-            sentiment: opportunity.sentiment,
-            language: opportunity.language,
-            suggestedAction: opportunity.suggestedAction,
-            summary: opportunity.summary,
-          },
-          create: opportunity,
-        });
-        saved += 1;
-      }
+      saved = await saveOpportunities(result.opportunities);
     }
 
     await prisma.sourceConfig.upsert({
@@ -438,7 +452,18 @@ async function fetchSource(platform: string, keywords: string[], dryRun: boolean
       return metaStatus();
     case "Public Web": {
       const config = await prisma.sourceConfig.findUnique({ where: { platform: "Public Web" } });
-      return fetchWebOpportunities({ keywords, dryRun, limit: 20, urls: sourceConfigUrls(config?.config) });
+      const scraperConfig = sourceConfigObject(config?.config);
+      return fetchWebOpportunities({
+        keywords,
+        dryRun,
+        limit: 50,
+        urls: sourceConfigUrls(scraperConfig),
+        selector: stringConfig(scraperConfig.selector),
+        paginationTemplate: stringConfig(scraperConfig.paginationTemplate),
+        maxPages: numberConfig(scraperConfig.maxPages, 1),
+        delayMs: numberConfig(scraperConfig.delayMs, 1200),
+        timeoutMs: numberConfig(scraperConfig.timeoutMs, 12000),
+      });
     }
     default:
       return {
@@ -451,8 +476,21 @@ async function fetchSource(platform: string, keywords: string[], dryRun: boolean
 }
 
 function sourceConfigUrls(config: unknown) {
-  if (!config || typeof config !== "object" || !("urls" in config)) return [];
-  const urls = (config as { urls?: unknown }).urls;
+  const object = sourceConfigObject(config);
+  const urls = object.urls;
   if (!Array.isArray(urls)) return [];
   return urls.filter((url): url is string => typeof url === "string");
+}
+
+function sourceConfigObject(config: unknown): Record<string, unknown> {
+  if (!config || typeof config !== "object" || Array.isArray(config)) return {};
+  return config as Record<string, unknown>;
+}
+
+function stringConfig(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
+function numberConfig(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }

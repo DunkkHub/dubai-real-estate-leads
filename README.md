@@ -1,6 +1,6 @@
-# Dubai Lead CRM
+# Dubai Real Estate Opportunity Scraper
 
-Consent-first Dubai real estate opportunity discovery and CRM platform.
+Scraper-first, consent-safe Dubai real estate opportunity discovery and CRM platform.
 
 ## What It Does
 
@@ -10,6 +10,7 @@ Consent-first Dubai real estate opportunity discovery and CRM platform.
 - Provides dashboard KPIs, source/lead-stage charts, outreach queue, CRM pipeline, notes, follow-ups, import/export, deletion, withdrawal, and compliance settings.
 - Includes official-API connector modules for Reddit, YouTube, X, Meta webhooks, CSV import, and a robots-aware Public Web scraper.
 - Does not include automatic DMs, automatic comments, profile contact scraping, or spam sending.
+- Adds a dedicated `/scraper` dashboard for scrape jobs, hot/warm/ignored public opportunities, source quality, and opportunity CSV export.
 
 ## Tech Stack
 
@@ -57,6 +58,27 @@ Optional:
 
 Missing source credentials are shown as `not_configured` and do not crash pages.
 
+## Scraper Commands
+
+The scraper commands create `ScrapeJob` records and save only public, buyer-intent `Opportunity` records. Missing API keys return a clean `not_configured` result.
+
+```bash
+pnpm scrape:reddit
+pnpm scrape:youtube
+pnpm scrape:x
+pnpm scrape:web
+pnpm scrape:all
+```
+
+Source behavior:
+
+- Reddit uses the official OAuth API, searches targeted public subreddits, then stores matching posts and comments separately.
+- YouTube uses the YouTube Data API, searches Dubai real estate videos, then stores qualifying public top-level comments from `commentThreads.list`.
+- X uses the official recent search API when `X_BEARER_TOKEN` is available.
+- Public Web fetches only configured public URLs, checks `robots.txt`, supports CSS selectors, pagination templates, delays, timeouts, and text-hash dedupe.
+
+The scorer classifies opportunities as `HOT`, `WARM`, `LOW`, or `IGNORE` using buyer/investor phrases, budget, timeline, mortgage/ROI/off-plan language, Dubai areas, and spam/irrelevance penalties.
+
 ## Public Web Scraper
 
 The `/sources` page includes `Public Web`, a scraper for operator-approved seed URLs.
@@ -68,6 +90,7 @@ It:
 - uses a clear `DubaiLeadCRM-WebScraper` user agent
 - scans public page text for configured Dubai real estate intent keywords
 - saves matching snippets as `Opportunity` records
+- supports CSS selector extraction, pagination templates, maximum pages, request delay, request timeout, and text hash duplicate detection
 - never stores scraped emails, phones, WhatsApp numbers, or private profile contact data
 
 It does not:
@@ -84,7 +107,23 @@ Opportunity CSV accepts:
 - `sourceUrl`
 - `platform`
 - `publicTextSnippet` or `text`
-- optional `authorHandle`, `language`
+- optional `title`, `externalId`, `postId`, `commentId`, `authorHandle`, `language`
+
+Opportunity export is available at `/api/opportunities/export` and includes:
+
+- `platform`
+- `sourceUrl`
+- `title`
+- `publicTextSnippet`
+- `authorHandle`
+- `detectedBudget`
+- `detectedArea`
+- `detectedTimeline`
+- `detectedPropertyType`
+- `intentCategory`
+- `intentScore`
+- `status`
+- `scrapedAt`
 
 Lead CSV requires consent proof:
 

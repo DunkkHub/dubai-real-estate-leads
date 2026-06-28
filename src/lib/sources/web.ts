@@ -1,14 +1,26 @@
+import * as cheerio from "cheerio";
+import { hashText } from "@/lib/scraper/dedupe";
 import { normalizePublicTextOpportunity, sourceRateLimit } from "@/lib/sources/shared";
 import type { SourceFetchOptions, SourceFetchResult } from "@/lib/sources/types";
 
 type WebFetchOptions = SourceFetchOptions & {
   urls: string[];
+  selector?: string | null;
+  paginationTemplate?: string | null;
+  maxPages?: number;
+  delayMs?: number;
+  timeoutMs?: number;
 };
 
 const USER_AGENT = "DubaiLeadCRM-WebScraper/1.0 (+public-opportunity-monitor; respects robots.txt)";
 
 export async function fetchWebOpportunities(options: WebFetchOptions): Promise<SourceFetchResult> {
-  const urls = options.urls.map(normalizeUrl).filter(Boolean) as string[];
+  const urls = expandPaginatedUrls(options)
+    .map(normalizeUrl)
+    .filter(Boolean) as string[];
+  const selector = options.selector?.trim() || null;
+  const delayMs = Math.max(options.delayMs ?? 1200, 0);
+  const timeoutMs = Math.min(Math.max(options.timeoutMs ?? 12_000, 3000), 30_000);
 
   if (urls.length === 0) {
     return {
@@ -24,12 +36,15 @@ export async function fetchWebOpportunities(options: WebFetchOptions): Promise<S
       configured: true,
       status: "dry_run",
       message: `Public Web dry run would check ${urls.length} URL${urls.length === 1 ? "" : "s"}.`,
-      opportunities: urls.slice(0, options.limit ?? 10).map((url) =>
+      opportunities: urls.slice(0, options.limit ?? 10).map((url, index) =>
         normalizePublicTextOpportunity({
           platform: "Public Web",
           sourceUrl: url,
+          title: `Dry run page ${index + 1}`,
+          externalId: hashText(url),
           authorHandle: new URL(url).hostname,
-          text: `Dry run placeholder for ${url}. Configure real public pages that discuss Dubai property, ROI, areas, mortgage, relocation, or off-plan investment.`,
+          text: `Looking to buy apartment in Dubai with 1M AED budget this year. Comparing JVC, Dubai Marina, mortgage, ROI and rental yield on ${url}.`,
+          rawJson: { url, selector, dryRun: true },
         }),
       ),
     };
@@ -46,10 +61,11 @@ export async function fetchWebOpportunities(options: WebFetchOptions): Promise<S
 
   const opportunities = [];
   const errors: string[] = [];
+  const seenTextHashes = new Set<string>();
 
-  for (const url of urls.slice(0, options.limit ?? 20)) {
+  for (const url of urls.slice(0, options.limit ?? 50)) {
     try {
-      const allowed = await robotsAllowed(url);
+      const allowed = await robotsAllowed(url, timeoutMs);
       if (!allowed) {
         errors.push(`${url}: blocked by robots.txt`);
         continue;
@@ -60,7 +76,7 @@ export async function fetchWebOpportunities(options: WebFetchOptions): Promise<S
           "User-Agent": USER_AGENT,
           Accept: "text/html,application/xhtml+xml,text/plain;q=0.9,*/*;q=0.5",
         },
-        signal: AbortSignal.timeout(12_000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
 
       const contentType = response.headers.get("content-type") || "";
@@ -70,19 +86,29 @@ export async function fetchWebOpportunities(options: WebFetchOptions): Promise<S
       }
 
       const html = await response.text();
-      const text = htmlToText(html);
-      const snippets = matchingSnippets(text, options.keywords).slice(0, 5);
+      const title = extractTitle(html);
+      const textBlocks = selector ? extractSelectorText(html, selector) : [htmlToText(html)];
+      const snippets = textBlocks.flatMap((text) => matchingSnippets(text, options.keywords)).slice(0, 10);
 
       for (const [index, snippet] of snippets.entries()) {
+        const textHash = hashText(snippet);
+        if (seenTextHashes.has(textHash)) continue;
+        seenTextHashes.add(textHash);
+
         opportunities.push(
           normalizePublicTextOpportunity({
             platform: "Public Web",
             sourceUrl: `${url}${url.includes("#") ? "" : `#scrape-match-${index + 1}`}`,
+            title,
+            externalId: textHash,
             authorHandle: new URL(url).hostname,
             text: snippet,
+            rawJson: { url, selector, textHash, title },
           }),
         );
       }
+
+      if (delayMs > 0) await sleep(delayMs);
     } catch (error) {
       errors.push(`${url}: ${error instanceof Error ? error.message : "fetch failed"}`);
     }
@@ -96,6 +122,17 @@ export async function fetchWebOpportunities(options: WebFetchOptions): Promise<S
   };
 }
 
+function expandPaginatedUrls(options: WebFetchOptions) {
+  const maxPages = Math.min(Math.max(options.maxPages ?? 1, 1), 20);
+  if (!options.paginationTemplate) return options.urls;
+
+  const urls = [...options.urls];
+  for (let page = 1; page <= maxPages; page += 1) {
+    urls.push(options.paginationTemplate.replaceAll("{page}", String(page)));
+  }
+  return Array.from(new Set(urls));
+}
+
 function normalizeUrl(value: string) {
   try {
     const url = new URL(value.trim());
@@ -107,13 +144,13 @@ function normalizeUrl(value: string) {
   }
 }
 
-async function robotsAllowed(targetUrl: string) {
+async function robotsAllowed(targetUrl: string, timeoutMs: number) {
   const url = new URL(targetUrl);
   const robotsUrl = `${url.origin}/robots.txt`;
   try {
     const response = await fetch(robotsUrl, {
       headers: { "User-Agent": USER_AGENT },
-      signal: AbortSignal.timeout(5000),
+      signal: AbortSignal.timeout(Math.min(timeoutMs, 5000)),
     });
     if (!response.ok) return true;
     const robots = await response.text();
@@ -159,20 +196,25 @@ function longestMatch(pathname: string, rules: string[]) {
   }, 0);
 }
 
+function extractSelectorText(html: string, selector: string) {
+  const $ = cheerio.load(html);
+  const blocks: string[] = [];
+  $(selector).each((_, element) => {
+    const text = cleanSnippet($(element).text());
+    if (text.length > 80) blocks.push(text);
+  });
+  return blocks.length ? blocks : [htmlToText(html)];
+}
+
+function extractTitle(html: string) {
+  const $ = cheerio.load(html);
+  return cleanSnippet($("title").first().text()).slice(0, 180) || null;
+}
+
 function htmlToText(html: string) {
-  return html
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<noscript[\s\S]*?<\/noscript>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&#39;/g, "'")
-    .replace(/&quot;/g, '"')
-    .replace(/\s+/g, " ")
-    .trim();
+  const $ = cheerio.load(html);
+  $("script,style,noscript,svg,iframe,form,nav,header,footer").remove();
+  return cleanSnippet($.text());
 }
 
 function matchingSnippets(text: string, keywords: string[]) {
@@ -182,7 +224,7 @@ function matchingSnippets(text: string, keywords: string[]) {
 
   for (const keyword of normalizedKeywords) {
     let index = normalizedText.indexOf(keyword);
-    while (index !== -1 && indexes.size < 25) {
+    while (index !== -1 && indexes.size < 50) {
       indexes.add(index);
       index = normalizedText.indexOf(keyword, index + keyword.length);
     }
@@ -190,8 +232,8 @@ function matchingSnippets(text: string, keywords: string[]) {
 
   return Array.from(indexes)
     .sort((a, b) => a - b)
-    .map((index) => cleanSnippet(text.slice(Math.max(index - 180, 0), Math.min(index + 520, text.length))))
-    .filter((snippet, index, all) => snippet.length > 80 && !looksLikeNavigation(snippet) && all.findIndex((other) => other.slice(0, 120) === snippet.slice(0, 120)) === index);
+    .map((index) => cleanSnippet(text.slice(Math.max(index - 220, 0), Math.min(index + 620, text.length))))
+    .filter((snippet, index, all) => snippet.length > 80 && !looksLikeNavigation(snippet) && all.findIndex((other) => hashText(other) === hashText(snippet)) === index);
 }
 
 function cleanSnippet(snippet: string) {
@@ -204,14 +246,13 @@ function cleanSnippet(snippet: string) {
   let cleaned = snippet;
   for (const marker of markers) {
     const index = cleaned.indexOf(marker);
-    if (index !== -1) {
-      cleaned = cleaned.slice(index + marker.length);
-    }
+    if (index !== -1) cleaned = cleaned.slice(index + marker.length);
   }
 
   return cleaned
     .replace(/Menu Search Magazine English Login Sign up Search Dubai Services Business directory Jobs Properties Classifieds Forum More Events Members/gi, " ")
     .replace(/Menu Search Magazine English Login Sign up Search/gi, " ")
+    .replace(/Buy Rent للبيع للايجار Skip to content/gi, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -220,4 +261,8 @@ function looksLikeNavigation(snippet: string) {
   const normalized = snippet.toLowerCase();
   const navigationSignals = ["login sign up search", "business directory jobs properties classifieds", "menu search magazine"];
   return navigationSignals.some((signal) => normalized.includes(signal));
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

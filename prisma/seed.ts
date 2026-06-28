@@ -84,6 +84,7 @@ async function main() {
   await prisma.outreachTask.deleteMany();
   await prisma.lead.deleteMany();
   await prisma.opportunity.deleteMany();
+  await prisma.scrapeJob.deleteMany();
   await prisma.importJob.deleteMany();
   await prisma.keywordConfig.deleteMany();
   await prisma.sourceConfig.deleteMany();
@@ -115,7 +116,7 @@ async function main() {
       platform,
       enabled: !["LinkedIn", "Public Web"].includes(platform),
       status: platform === "LinkedIn" ? "manual_import" : "not_configured",
-      config: platform === "Public Web" ? { urls: [] } : {},
+      config: platform === "Public Web" ? { urls: [], selector: null, paginationTemplate: null, maxPages: 1, delayMs: 1200, timeoutMs: 12000 } : {},
     })),
   });
 
