@@ -1,0 +1,281 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  ADMIN
+  AGENT
+}
+
+enum OpportunityStatus {
+  NEW
+  OUTREACH_CREATED
+  NOT_RELEVANT
+  CONVERTED
+}
+
+enum OutreachStatus {
+  PENDING
+  REPLIED
+  IGNORED
+  CONVERTED
+}
+
+enum LeadStage {
+  NEW
+  QUALIFIED
+  CONTACTED
+  VIEWING
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum ConsentStatus {
+  ACTIVE
+  WITHDRAWN
+}
+
+enum TransactionType {
+  BUY
+  RENT
+}
+
+enum Purpose {
+  INVESTMENT
+  LIVING
+  RELOCATION
+  HOLIDAY_HOME
+}
+
+enum ImportType {
+  OPPORTUNITIES
+  LEADS
+}
+
+enum ImportStatus {
+  PENDING
+  COMPLETED
+  FAILED
+}
+
+enum KeywordType {
+  TARGET
+  EXCLUDED
+  AREA
+}
+
+model User {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  passwordHash String
+  role         UserRole       @default(AGENT)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  assignedLeads       Lead[]
+  assignedOutreach    OutreachTask[]
+  notes               Note[]
+  followUps           FollowUpTask[]
+  auditLogs           AuditLog[]
+}
+
+model Opportunity {
+  id               String            @id @default(cuid())
+  platform         String
+  sourceUrl        String            @unique
+  authorHandle     String?
+  publicTextSnippet String
+  detectedKeywords String[]
+  detectedArea     String?
+  intentCategory   String
+  intentScore      Int
+  sentiment        String
+  language         String            @default("en")
+  summary          String?
+  suggestedAction  String
+  status           OpportunityStatus @default(NEW)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  outreachTasks OutreachTask[]
+  leads         Lead[]
+
+  @@index([platform])
+  @@index([status])
+  @@index([intentScore])
+  @@index([createdAt])
+}
+
+model Lead {
+  id              String        @id @default(cuid())
+  fullName        String
+  email           String?       @unique
+  phone           String?       @unique
+  whatsapp        String?
+  budgetAed       Int?
+  transactionType TransactionType
+  propertyType    String
+  preferredArea   String
+  purpose         Purpose
+  timeline        String
+  wantsMortgage   Boolean       @default(false)
+  score           Int
+  temperature     String
+  stage           LeadStage     @default(NEW)
+  source          String
+  sourceUrl       String?
+  assignedToId    String?
+  consentStatus   ConsentStatus @default(ACTIVE)
+  opportunityId   String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  assignedTo     User?           @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  opportunity    Opportunity?    @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  consentRecords ConsentRecord[]
+  notes          Note[]
+  followUps      FollowUpTask[]
+  auditLogs      AuditLog[]
+
+  @@index([stage])
+  @@index([score])
+  @@index([consentStatus])
+  @@index([createdAt])
+}
+
+model ConsentRecord {
+  id                 String        @id @default(cuid())
+  leadId             String
+  consentText        String
+  consentChannel     String
+  consentSourceUrl   String?
+  consentTimestamp   DateTime
+  ipAddress          String?
+  userAgent          String?
+  canContactWhatsapp Boolean       @default(false)
+  canContactEmail    Boolean       @default(false)
+  canContactPhone    Boolean       @default(false)
+  withdrawnAt        DateTime?
+  createdAt          DateTime      @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model OutreachTask {
+  id                   String         @id @default(cuid())
+  opportunityId         String
+  platform             String
+  suggestedPublicReply String
+  status               OutreachStatus @default(PENDING)
+  dueDate              DateTime?
+  assignedToId         String?
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+
+  opportunity Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  assignedTo  User?       @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([dueDate])
+}
+
+model Note {
+  id        String   @id @default(cuid())
+  leadId    String
+  authorId  String?
+  body      String
+  createdAt DateTime @default(now())
+
+  lead   Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  author User? @relation(fields: [authorId], references: [id], onDelete: SetNull)
+}
+
+model FollowUpTask {
+  id          String   @id @default(cuid())
+  leadId      String
+  title       String
+  dueDate     DateTime
+  completedAt DateTime?
+  assignedToId String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  lead       Lead  @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assignedTo User? @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+
+  @@index([dueDate])
+  @@index([completedAt])
+}
+
+model SourceConfig {
+  id            String   @id @default(cuid())
+  platform      String   @unique
+  enabled       Boolean  @default(false)
+  status        String   @default("not_configured")
+  config        Json     @default("{}")
+  lastCheckedAt DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model KeywordConfig {
+  id        String      @id @default(cuid())
+  type      KeywordType
+  value     String
+  enabled   Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@unique([type, value])
+  @@index([type])
+}
+
+model ComplianceSetting {
+  id                       String   @id @default(cuid())
+  consentText              String
+  privacyPolicyText        String
+  unsubscribeText          String
+  allowedContactStartHour  Int      @default(9)
+  allowedContactEndHour    Int      @default(18)
+  dataRetentionDays        Int      @default(730)
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+}
+
+model ImportJob {
+  id             String       @id @default(cuid())
+  type           ImportType
+  status         ImportStatus @default(PENDING)
+  filename       String
+  totalRows      Int          @default(0)
+  importedRows   Int          @default(0)
+  rejectedRows   Int          @default(0)
+  errorSummary   String?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  actorId     String?
+  action      String
+  entityType  String
+  entityId    String?
+  metadata    Json     @default("{}")
+  leadId      String?
+  createdAt   DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  lead  Lead? @relation(fields: [leadId], references: [id], onDelete: SetNull)
+
+  @@index([action])
+  @@index([entityType])
+  @@index([createdAt])
+}

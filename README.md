@@ -1,36 +1,96 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Dubai Lead CRM
 
-## Getting Started
+Consent-first Dubai real estate opportunity discovery and CRM platform.
 
-First, run the development server:
+## What It Does
+
+- Stores public social conversations as `Opportunity` records, not leads.
+- Creates CRM `Lead` records only after explicit consent through the landing page, ROI calculator, manual proof, CSV proof, or Meta Lead Ads metadata.
+- Stores consent proof: exact text, timestamp, source, channel, IP, user agent, and allowed contact channels.
+- Provides dashboard KPIs, source/lead-stage charts, outreach queue, CRM pipeline, notes, follow-ups, import/export, deletion, withdrawal, and compliance settings.
+- Includes official-API connector modules for Reddit, YouTube, X, Meta webhooks, and CSV import.
+- Does not include automatic DMs, automatic comments, profile contact scraping, or spam sending.
+
+## Tech Stack
+
+Next.js `16.2.9` App Router, TypeScript, Tailwind CSS, shadcn-style local UI components, PostgreSQL, Prisma `7.8`, NextAuth credentials login, Zod, React Hook Form, Recharts, Docker Compose, Vitest.
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
+docker compose up -d
+pnpm db:push
+pnpm db:seed
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Seeded login:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- Email: `admin@dubai-leads.local`
+- Password: `Password123!`
 
-## Learn More
+## Environment
 
-To learn more about Next.js, take a look at the following resources:
+Copy `.env.example` to `.env` and update secrets before production.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Required:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `DATABASE_URL`
+- `NEXTAUTH_SECRET`
+- `NEXTAUTH_URL`
+- `APP_URL`
 
-## Deploy on Vercel
+Optional:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `OPENAI_API_KEY`
+- `REDDIT_CLIENT_ID`
+- `REDDIT_CLIENT_SECRET`
+- `REDDIT_USER_AGENT`
+- `YOUTUBE_API_KEY`
+- `X_BEARER_TOKEN`
+- `META_APP_ID`
+- `META_APP_SECRET`
+- `META_WEBHOOK_VERIFY_TOKEN`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Missing source credentials are shown as `not_configured` and do not crash pages.
+
+## CSV Imports
+
+Opportunity CSV accepts:
+
+- `sourceUrl`
+- `platform`
+- `publicTextSnippet` or `text`
+- optional `authorHandle`, `language`
+
+Lead CSV requires consent proof:
+
+- `fullName`
+- at least one of `email`, `phone`, `whatsapp`
+- `consentTimestamp` or `consentDate`
+- `consentSourceUrl` or `consentSource`
+- recommended: `consentText`, `consentChannel`, `budgetAed`, `transactionType`, `propertyType`, `preferredArea`, `purpose`, `timeline`
+
+Lead rows without consent source/date are rejected.
+
+## Tests
+
+```bash
+pnpm test
+pnpm lint
+pnpm build
+```
+
+## Compliance Notes
+
+- Public conversations are opportunities only.
+- Leads require a `ConsentRecord`.
+- Consent checkbox is unchecked by default.
+- Marketing contact should check `consentStatus` and channel flags first.
+- Users can withdraw consent at `/unsubscribe/[leadId]`.
+- Agents can export or delete a lead from `/leads/[id]`.
+- Imports, exports, lead creation, consent changes, and deletion are audit logged.
+- Source connectors never collect private contact data and expose no automatic reply/DM behavior.
