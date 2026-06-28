@@ -1,12 +1,15 @@
-import { KeyRound, Plus, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { KeyRound, Play, Plus, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/app-shell";
 import { Badge } from "@/components/ui/badge";
+import { buttonClassName } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, Input, Select } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { addKeywordAction, deleteKeywordAction, updateSourceEnabledAction } from "@/app/actions/crm";
+import { addKeywordAction, deleteKeywordAction, syncSourceAction, updateSourceEnabledAction } from "@/app/actions/crm";
 import { requireUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/prisma";
+import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -18,8 +21,14 @@ const sourceDefinitions = [
   { platform: "LinkedIn", env: ["Manual CSV import only"] },
 ];
 
-export default async function SourcesPage() {
+type PageProps = {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+export default async function SourcesPage({ searchParams }: PageProps) {
   const user = await requireUser();
+  const params = (await searchParams) ?? {};
+  const syncMessage = typeof params.sync === "string" ? params.sync : "";
   const [configs, keywords] = await Promise.all([
     prisma.sourceConfig.findMany(),
     prisma.keywordConfig.findMany({ orderBy: [{ type: "asc" }, { value: "asc" }] }),
@@ -30,15 +39,44 @@ export default async function SourcesPage() {
       <div className="space-y-6">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-stone-950">Sources</h1>
-          <p className="mt-1 text-sm text-stone-600">Official API credentials are read from environment variables. Private contact data is never collected from profiles.</p>
+          <p className="mt-1 text-sm text-stone-600">Generate public opportunities from official APIs, then convert people to leads only after opt-in.</p>
         </div>
+
+        {syncMessage ? <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">{syncMessage}</div> : null}
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Lead generation loop</CardTitle>
+            <CardDescription>Run source monitoring to create opportunities. Leads are generated when people opt in through the landing page, calculator, Meta Lead Ads, CSV consent import, or manual consent proof.</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-end">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Link className={buttonClassName("secondary")} href="/landing">Open opt-in landing page</Link>
+              <Link className={buttonClassName("secondary")} href="/calculator">Open ROI calculator</Link>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <form action={syncSourceAction}>
+                <input type="hidden" name="platform" value="All" />
+                <SubmitButton pendingText="Syncing...">
+                  <Play className="h-4 w-4" aria-hidden="true" />
+                  Sync all sources
+                </SubmitButton>
+              </form>
+              <form action={syncSourceAction}>
+                <input type="hidden" name="platform" value="All" />
+                <input type="hidden" name="dryRun" value="true" />
+                <SubmitButton variant="secondary" pendingText="Checking...">Dry run all</SubmitButton>
+              </form>
+            </div>
+          </CardContent>
+        </Card>
 
         <section className="grid gap-4 lg:grid-cols-2">
           {sourceDefinitions.map((source) => {
             const config = configs.find((item) => item.platform === source.platform);
             const missing = source.env.filter((key) => key.includes("_") && !process.env[key]);
             const configured = missing.length === 0 && !source.env[0].startsWith("Manual");
-            const status = source.env[0].startsWith("Manual") ? "manual_import" : configured ? "configured" : "not_configured";
+            const status = config?.status || (source.env[0].startsWith("Manual") ? "manual_import" : configured ? "configured" : "not_configured");
             return (
               <Card key={source.platform}>
                 <CardHeader>
@@ -50,6 +88,7 @@ export default async function SourcesPage() {
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge tone={configured || status === "manual_import" ? "active" : "withdrawn"}>{status}</Badge>
                     {missing.map((item) => <Badge key={item}>{item} missing</Badge>)}
+                    {config?.lastCheckedAt ? <span className="text-xs text-stone-500">Checked {formatDate(config.lastCheckedAt)}</span> : null}
                   </div>
                   <form action={updateSourceEnabledAction} className="flex items-center justify-between gap-3 rounded-md border border-stone-200 p-3">
                     <input type="hidden" name="platform" value={source.platform} />
@@ -59,6 +98,20 @@ export default async function SourcesPage() {
                     </label>
                     <SubmitButton variant="secondary" size="sm">Save</SubmitButton>
                   </form>
+                  <div className="flex flex-wrap gap-2">
+                    <form action={syncSourceAction}>
+                      <input type="hidden" name="platform" value={source.platform} />
+                      <SubmitButton size="sm" pendingText="Syncing...">
+                        <Play className="h-4 w-4" aria-hidden="true" />
+                        Sync public opportunities
+                      </SubmitButton>
+                    </form>
+                    <form action={syncSourceAction}>
+                      <input type="hidden" name="platform" value={source.platform} />
+                      <input type="hidden" name="dryRun" value="true" />
+                      <SubmitButton variant="secondary" size="sm" pendingText="Checking...">Dry run</SubmitButton>
+                    </form>
+                  </div>
                 </CardContent>
               </Card>
             );

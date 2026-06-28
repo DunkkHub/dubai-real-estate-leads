@@ -8,8 +8,14 @@ import { requireUser } from "@/lib/auth/session";
 import { complianceSchema, followUpSchema, keywordSchema, manualLeadSchema, noteSchema, sourceConfigSchema } from "@/lib/validators/lead";
 import { createConsentedLead, deleteLeadWithAudit, withdrawLeadConsent } from "@/lib/leads";
 import { analyzeOpportunityWithAi } from "@/lib/ai";
+import { TARGET_KEYWORDS } from "@/lib/constants";
 import { prisma } from "@/lib/prisma";
 import { suggestedPublicReply } from "@/lib/scoring";
+import { fetchRedditOpportunities } from "@/lib/sources/reddit";
+import { fetchYouTubeOpportunities } from "@/lib/sources/youtube";
+import { fetchXOpportunities } from "@/lib/sources/x";
+import { metaStatus } from "@/lib/sources/meta";
+import type { SourceFetchResult } from "@/lib/sources/types";
 
 function formString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -269,4 +275,111 @@ export async function updateSourceEnabledAction(formData: FormData) {
   });
   await auditLog({ actorId: user.id, action: "source.updated", entityType: "SourceConfig", metadata: parsed.data });
   revalidatePath("/sources");
+}
+
+export async function syncSourceAction(formData: FormData) {
+  const user = await requireUser();
+  const platform = formString(formData, "platform");
+  const dryRun = formBool(formData, "dryRun");
+  const keywords = await prisma.keywordConfig.findMany({
+    where: { type: "TARGET", enabled: true },
+    orderBy: { value: "asc" },
+  });
+  const keywordValues = keywords.length ? keywords.map((keyword) => keyword.value) : TARGET_KEYWORDS;
+  const platforms = platform === "All" ? ["Reddit", "YouTube", "X", "Meta"] : [platform];
+  const results: Array<{ platform: string; result: SourceFetchResult; saved: number }> = [];
+
+  for (const current of platforms) {
+    const result = await fetchSource(current, keywordValues, dryRun);
+    let saved = 0;
+
+    if (!dryRun && result.opportunities.length > 0) {
+      for (const opportunity of result.opportunities) {
+        await prisma.opportunity.upsert({
+          where: { sourceUrl: opportunity.sourceUrl },
+          update: {
+            platform: opportunity.platform,
+            authorHandle: opportunity.authorHandle,
+            publicTextSnippet: opportunity.publicTextSnippet,
+            detectedKeywords: opportunity.detectedKeywords,
+            detectedArea: opportunity.detectedArea,
+            intentCategory: opportunity.intentCategory,
+            intentScore: opportunity.intentScore,
+            sentiment: opportunity.sentiment,
+            language: opportunity.language,
+            suggestedAction: opportunity.suggestedAction,
+            summary: opportunity.summary,
+          },
+          create: opportunity,
+        });
+        saved += 1;
+      }
+    }
+
+    await prisma.sourceConfig.upsert({
+      where: { platform: current },
+      update: {
+        status: result.status,
+        lastCheckedAt: new Date(),
+      },
+      create: {
+        platform: current,
+        enabled: result.configured,
+        status: result.status,
+        config: {},
+        lastCheckedAt: new Date(),
+      },
+    });
+
+    results.push({ platform: current, result, saved });
+  }
+
+  await auditLog({
+    actorId: user.id,
+    action: dryRun ? "source.dry_run" : "source.synced",
+    entityType: "SourceConfig",
+    metadata: {
+      platform,
+      dryRun,
+      results: results.map((item) => ({
+        platform: item.platform,
+        status: item.result.status,
+        found: item.result.opportunities.length,
+        saved: item.saved,
+      })),
+    },
+  });
+
+  revalidatePath("/sources");
+  revalidatePath("/opportunities");
+  revalidatePath("/dashboard");
+
+  const found = results.reduce((total, item) => total + item.result.opportunities.length, 0);
+  const saved = results.reduce((total, item) => total + item.saved, 0);
+  const notConfigured = results.filter((item) => item.result.status === "not_configured").map((item) => item.platform);
+  const message = dryRun
+    ? `Dry run found ${found} public opportunities. ${notConfigured.length ? `Not configured: ${notConfigured.join(", ")}.` : ""}`
+    : `Saved ${saved} public opportunities. ${notConfigured.length ? `Not configured: ${notConfigured.join(", ")}.` : ""}`;
+
+  redirect(`/sources?sync=${encodeURIComponent(message)}`);
+}
+
+async function fetchSource(platform: string, keywords: string[], dryRun: boolean) {
+  switch (platform) {
+    case "Reddit":
+      return fetchRedditOpportunities({ keywords, dryRun, limit: 25 });
+    case "YouTube":
+      return fetchYouTubeOpportunities({ keywords, dryRun, limit: 15 });
+    case "X":
+      return fetchXOpportunities({ keywords, dryRun, limit: 25 });
+    case "Meta":
+      return metaStatus();
+    default:
+      return {
+        configured: false,
+        status: "not_configured" as const,
+        message: `${platform} is available through CSV import or a business-owned integration only.`,
+        opportunities: [],
+      };
+  }
 }
