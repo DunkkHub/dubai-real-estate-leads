@@ -190,6 +190,34 @@ function matchingSnippets(text: string, keywords: string[]) {
 
   return Array.from(indexes)
     .sort((a, b) => a - b)
-    .map((index) => text.slice(Math.max(index - 180, 0), Math.min(index + 420, text.length)).trim())
-    .filter((snippet, index, all) => snippet.length > 80 && all.findIndex((other) => other.slice(0, 120) === snippet.slice(0, 120)) === index);
+    .map((index) => cleanSnippet(text.slice(Math.max(index - 180, 0), Math.min(index + 520, text.length))))
+    .filter((snippet, index, all) => snippet.length > 80 && !looksLikeNavigation(snippet) && all.findIndex((other) => other.slice(0, 120) === snippet.slice(0, 120)) === index);
+}
+
+function cleanSnippet(snippet: string) {
+  const markers = [
+    "Post new topic Subscribe",
+    "Pictures home / Forum / United Arab Emirates / Dubai /",
+    "home / Forum / United Arab Emirates / Dubai /",
+  ];
+
+  let cleaned = snippet;
+  for (const marker of markers) {
+    const index = cleaned.indexOf(marker);
+    if (index !== -1) {
+      cleaned = cleaned.slice(index + marker.length);
+    }
+  }
+
+  return cleaned
+    .replace(/Menu Search Magazine English Login Sign up Search Dubai Services Business directory Jobs Properties Classifieds Forum More Events Members/gi, " ")
+    .replace(/Menu Search Magazine English Login Sign up Search/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function looksLikeNavigation(snippet: string) {
+  const normalized = snippet.toLowerCase();
+  const navigationSignals = ["login sign up search", "business directory jobs properties classifieds", "menu search magazine"];
+  return navigationSignals.some((signal) => normalized.includes(signal));
 }
